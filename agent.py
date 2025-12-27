@@ -112,29 +112,35 @@ class JobDescriptionExtractor:
                 "skills_experience": "",
             }
 
-    def process_dataframe(
+    def process_and_write_csv(
         self,
         df: pd.DataFrame,
+        output_file: str,
         description_column: str = "description",
         batch_delay: float = 1.0,
-    ) -> pd.DataFrame:
+    ) -> None:
         """
-        Process entire dataframe and add extracted columns
+        Process dataframe and write results entry-wise to CSV
 
         Args:
             df: Input dataframe with job descriptions
+            output_file: Path to output CSV file
             description_column: Name of column containing descriptions
             batch_delay: Delay between API calls to avoid rate limits (seconds)
-
-        Returns:
-            DataFrame with three new columns added
         """
         if description_column not in df.columns:
             raise ValueError(f"Column '{description_column}' not found in dataframe")
 
-        df["extracted_description"] = ""
-        df["key_responsibilities"] = ""
-        df["required_skills_experience"] = ""
+        # Prepare output columns
+        output_columns = list(df.columns) + [
+            "extracted_description",
+            "key_responsibilities",
+            "required_skills_experience",
+        ]
+
+        # Write header to output CSV
+        with open(output_file, "w", encoding="utf-8-sig") as f:
+            f.write(",".join([f'"{col}"' for col in output_columns]) + "\n")
 
         total_rows = len(df)
         successful = 0
@@ -142,7 +148,6 @@ class JobDescriptionExtractor:
 
         for idx, row in df.iterrows():
             print(f"Processing row {idx + 1}/{total_rows}...", end=" ")
-
             description = row[description_column]
             extracted = self.extract_job_info(description)
 
@@ -157,9 +162,19 @@ class JobDescriptionExtractor:
                 failed += 1
                 print("✗")
 
-            df.at[idx, "extracted_description"] = extracted["extracted_description"]
-            df.at[idx, "key_responsibilities"] = extracted["responsibilities"]
-            df.at[idx, "required_skills_experience"] = extracted["skills_experience"]
+            # Prepare row for writing
+            row_data = [
+                str(row.get(col, "")).replace('"', '""') if not pd.isna(row.get(col, "")) else ""
+                for col in df.columns
+            ] + [
+                extracted["extracted_description"].replace('"', '""'),
+                extracted["responsibilities"].replace('"', '""'),
+                extracted["skills_experience"].replace('"', '""'),
+            ]
+
+            # Write row to output CSV
+            with open(output_file, "a", encoding="utf-8-sig") as f:
+                f.write(",".join([f'"{item}"' for item in row_data]) + "\n")
 
             if idx < total_rows - 1:
                 time.sleep(batch_delay)
@@ -167,8 +182,6 @@ class JobDescriptionExtractor:
         print("\nProcessing complete!")
         print(f"Successful: {successful}/{total_rows}")
         print(f"Failed: {failed}/{total_rows}")
-
-        return df
 
 
 def main():
@@ -202,44 +215,15 @@ def main():
         return
 
     print("\nStarting extraction process...\n")
-    df_processed = extractor.process_dataframe(
-        df, description_column="description", batch_delay=1.0
-    )
-
     # Generate dynamic output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(os.path.basename(input_file))[0]
     output_file = f"{base_name}_processed_{timestamp}.csv"
 
-    df_processed.to_csv(
-        output_file, index=False, encoding="utf-8-sig", lineterminator="\n", quoting=1
+    extractor.process_and_write_csv(
+        df, output_file=output_file, description_column="description", batch_delay=1.0
     )
     print(f"\n✓ Results saved to {output_file}")
-
-    print("\n" + "=" * 70)
-    print("SAMPLE RESULTS")
-    print("=" * 70)
-
-    for idx in range(min(2, len(df_processed))):
-        row = df_processed.iloc[idx]
-        print(f"\n--- Job {idx + 1} ---")
-        print(f"Company: {row['company']}")
-        print(f"Title: {row['title']}")
-        print(f"Location: {row['location']}")
-
-        print("\n📝 Extracted Description:")
-        desc = row["extracted_description"]
-        print(f"{desc if desc else '(No description extracted)'}")
-
-        print("\n📋 Responsibilities:")
-        resp = row["key_responsibilities"]
-        print(f"{resp if resp else '(No responsibilities extracted)'}")
-
-        print("\n🎯 Skills:")
-        skills = row["required_skills_experience"]
-        print(f"{skills if skills else '(No skills extracted)'}")
-        print("\n" + "-" * 70)
-
     print("\n✅ Done!")
 
 
